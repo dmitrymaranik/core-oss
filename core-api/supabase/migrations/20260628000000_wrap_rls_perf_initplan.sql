@@ -158,3 +158,97 @@ ALTER POLICY "Users can view own preferences" ON public.user_preferences
 -- [PERF001] Wrap auth function call(s) in policy 'Service role can manage workspace invitations' on public.workspace_invitations so Postgres can cache the result for the whole statement instead of re-evaluating per row.
 ALTER POLICY "Service role can manage workspace invitations" ON public.workspace_invitations
     USING ((SELECT auth.role()) = CAST('service_role' AS text));
+
+-- Also wrap auth.uid() in the WITH CHECK clauses (the USING wraps were in the prior migration;
+-- pgrls fix --rule PERF001 only rewrote USING). Predicate-equivalent. Refs #50.
+
+ALTER POLICY "Users can create access requests" ON public.access_requests
+    WITH CHECK ((requester_id = (select auth.uid())));
+
+ALTER POLICY "Users can create conversations in their workspaces" ON public.agent_conversations
+    WITH CHECK (((workspace_id IN ( SELECT wm.workspace_id FROM workspace_members wm WHERE (wm.user_id = (select auth.uid())))) AND (created_by = (select auth.uid()))));
+
+ALTER POLICY "Workspace admins can insert agents" ON public.agent_instances
+    WITH CHECK ((workspace_id IN ( SELECT wm.workspace_id FROM workspace_members wm WHERE ((wm.user_id = (select auth.uid())) AND (wm.role = ANY (ARRAY['owner'::workspace_role, 'admin'::workspace_role]))))));
+
+ALTER POLICY "Users can create tasks in their workspaces" ON public.agent_tasks
+    WITH CHECK ((workspace_id IN ( SELECT wm.workspace_id FROM workspace_members wm WHERE (wm.user_id = (select auth.uid())))));
+
+ALTER POLICY "builder_conversations_insert" ON public.builder_conversations
+    WITH CHECK ((EXISTS ( SELECT 1 FROM builder_projects WHERE ((builder_projects.id = builder_conversations.project_id) AND (builder_projects.user_id = (select auth.uid()))))));
+
+ALTER POLICY "builder_deployments_insert" ON public.builder_deployments
+    WITH CHECK ((EXISTS ( SELECT 1 FROM builder_projects WHERE ((builder_projects.id = builder_deployments.project_id) AND (builder_projects.user_id = (select auth.uid()))))));
+
+ALTER POLICY "builder_messages_insert" ON public.builder_messages
+    WITH CHECK ((EXISTS ( SELECT 1 FROM (builder_conversations bc JOIN builder_projects bp ON ((bp.id = bc.project_id))) WHERE ((bc.id = builder_messages.conversation_id) AND (bp.user_id = (select auth.uid()))))));
+
+ALTER POLICY "builder_projects_insert" ON public.builder_projects
+    WITH CHECK (((select auth.uid()) = user_id));
+
+ALTER POLICY "builder_versions_insert" ON public.builder_versions
+    WITH CHECK ((EXISTS ( SELECT 1 FROM builder_projects WHERE ((builder_projects.id = builder_versions.project_id) AND (builder_projects.user_id = (select auth.uid()))))));
+
+ALTER POLICY "Channel owners can add members" ON public.channel_members
+    WITH CHECK (((EXISTS ( SELECT 1 FROM channel_members cm WHERE ((cm.channel_id = channel_members.channel_id) AND (cm.user_id = (select auth.uid())) AND (cm.role = ANY (ARRAY['owner'::text, 'moderator'::text]))))) OR (EXISTS ( SELECT 1 FROM channels c WHERE ((c.id = channel_members.channel_id) AND (c.created_by = (select auth.uid())))))));
+
+ALTER POLICY "Users can update their own read status" ON public.channel_read_status
+    WITH CHECK ((user_id = (select auth.uid())));
+
+ALTER POLICY "Workspace members can create channels" ON public.channels
+    WITH CHECK ((can_access_workspace_app(workspace_app_id, (select auth.uid())) AND (created_by = (select auth.uid()))));
+
+ALTER POLICY "Users can insert their own attachments" ON public.chat_attachments
+    WITH CHECK (((select auth.uid()) = user_id));
+
+ALTER POLICY "Users can insert their own conversations" ON public.conversations
+    WITH CHECK ((( SELECT (select auth.uid()) AS uid) = user_id));
+
+ALTER POLICY "Users can upload files in accessible workspaces" ON public.files
+    WITH CHECK ((((select auth.uid()) = user_id) AND ((workspace_app_id IS NULL) OR can_access_workspace_app(workspace_app_id))));
+
+ALTER POLICY "Users can insert own relationships" ON public.memory_relationships
+    WITH CHECK (((select auth.uid()) = user_id));
+
+ALTER POLICY "Users can insert messages to their conversations" ON public.messages
+    WITH CHECK ((EXISTS ( SELECT 1 FROM conversations WHERE ((conversations.id = messages.conversation_id) AND (conversations.user_id = ( SELECT (select auth.uid()) AS uid))))));
+
+ALTER POLICY "Users can manage own preferences" ON public.notification_preferences
+    WITH CHECK (((select auth.uid()) = user_id));
+
+ALTER POLICY "Users can manage own subscriptions" ON public.notification_subscriptions
+    WITH CHECK (((select auth.uid()) = user_id));
+
+ALTER POLICY "Users can update own notifications" ON public.notifications
+    WITH CHECK (((select auth.uid()) = user_id));
+
+ALTER POLICY "Share managers can create permissions" ON public.permissions
+    WITH CHECK (can_manage_shares((select auth.uid()), resource_type, resource_id));
+
+ALTER POLICY "Members can create boards in accessible workspace apps" ON public.project_boards
+    WITH CHECK ((can_access_workspace_app(workspace_app_id) AND ((created_by IS NULL) OR (created_by = (select auth.uid())))));
+
+ALTER POLICY "Members can add comment reactions" ON public.project_comment_reactions
+    WITH CHECK ((can_access_workspace_app(workspace_app_id) AND (user_id = (select auth.uid()))));
+
+ALTER POLICY "Members can create comments in accessible workspace apps" ON public.project_issue_comments
+    WITH CHECK ((can_access_workspace_app(workspace_app_id) AND (user_id = (select auth.uid()))));
+
+ALTER POLICY "Members can create issues in accessible workspace apps" ON public.project_issues
+    WITH CHECK ((can_access_workspace_app(workspace_app_id) AND (created_by = (select auth.uid()))));
+
+ALTER POLICY "Users can insert own memory" ON public.user_memory
+    WITH CHECK (((select auth.uid()) = user_id));
+
+ALTER POLICY "Users can insert own preferences" ON public.user_preferences
+    WITH CHECK (((select auth.uid()) = user_id));
+
+ALTER POLICY "Users can insert own data" ON public.users
+    WITH CHECK ((( SELECT (select auth.uid()) AS uid) = id));
+
+ALTER POLICY "Service role can manage workspace invitations" ON public.workspace_invitations
+    WITH CHECK (((select auth.role()) = 'service_role'::text));
+
+ALTER POLICY "Users can create workspaces" ON public.workspaces
+    WITH CHECK (((select auth.uid()) = owner_id));
+
