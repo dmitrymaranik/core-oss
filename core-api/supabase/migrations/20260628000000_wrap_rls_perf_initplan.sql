@@ -1,7 +1,8 @@
--- Wrap every auth.* call (USING + WITH CHECK, including calls nested inside EXISTS
--- subqueries) in (select ...) so Postgres evaluates each once per statement (InitPlan)
--- instead of once per row -- the Supabase-documented RLS perf pattern. Predicate-
--- equivalent (row visibility unchanged). Refs #50.
+-- Wrap each unwrapped auth.* call (USING + WITH CHECK, including calls
+-- nested inside EXISTS/IN subqueries) in (select ...) so Postgres evaluates
+-- each once per statement (InitPlan) instead of once per row -- the
+-- Supabase-documented RLS perf pattern. Predicate-equivalent (row visibility
+-- unchanged). Already-wrapped calls are left as-is. Refs #50.
 
 ALTER POLICY "Share managers can update requests" ON public.access_requests
     USING (can_manage_shares((select auth.uid()), resource_type, resource_id));
@@ -135,18 +136,6 @@ ALTER POLICY "Users can update their own attachments" ON public.chat_attachments
 ALTER POLICY "Users can view their own attachments" ON public.chat_attachments
     USING (((select auth.uid()) = user_id));
 
-ALTER POLICY "Users can delete their own conversations" ON public.conversations
-    USING ((( SELECT (select auth.uid()) AS uid) = user_id));
-
-ALTER POLICY "Users can insert their own conversations" ON public.conversations
-    WITH CHECK ((( SELECT (select auth.uid()) AS uid) = user_id));
-
-ALTER POLICY "Users can update their own conversations" ON public.conversations
-    USING ((( SELECT (select auth.uid()) AS uid) = user_id));
-
-ALTER POLICY "Users can view their own conversations" ON public.conversations
-    USING ((( SELECT (select auth.uid()) AS uid) = user_id));
-
 ALTER POLICY "Owner or admin can delete files" ON public.files
     USING ((((select auth.uid()) = user_id) OR ((workspace_id IS NOT NULL) AND is_workspace_admin(workspace_id))));
 
@@ -164,12 +153,6 @@ ALTER POLICY "Users can view own relationships" ON public.memory_relationships
 
 ALTER POLICY "Users can remove their own reactions" ON public.message_reactions
     USING ((user_id = (select auth.uid())));
-
-ALTER POLICY "Users can insert messages to their conversations" ON public.messages
-    WITH CHECK ((EXISTS ( SELECT 1 FROM conversations WHERE ((conversations.id = messages.conversation_id) AND (conversations.user_id = ( SELECT (select auth.uid()) AS uid))))));
-
-ALTER POLICY "Users can view messages of their conversations" ON public.messages
-    USING ((EXISTS ( SELECT 1 FROM conversations WHERE ((conversations.id = messages.conversation_id) AND (conversations.user_id = ( SELECT (select auth.uid()) AS uid))))));
 
 ALTER POLICY "Users can manage own preferences" ON public.notification_preferences
     USING (((select auth.uid()) = user_id))
@@ -245,15 +228,6 @@ ALTER POLICY "Users can update own preferences" ON public.user_preferences
 
 ALTER POLICY "Users can view own preferences" ON public.user_preferences
     USING (((select auth.uid()) = user_id));
-
-ALTER POLICY "Users can insert own data" ON public.users
-    WITH CHECK ((( SELECT (select auth.uid()) AS uid) = id));
-
-ALTER POLICY "Users can update own data" ON public.users
-    USING ((( SELECT (select auth.uid()) AS uid) = id));
-
-ALTER POLICY "Users can view own data" ON public.users
-    USING ((( SELECT (select auth.uid()) AS uid) = id));
 
 ALTER POLICY "Service role can manage workspace invitations" ON public.workspace_invitations
     USING (((select auth.role()) = 'service_role'::text))
